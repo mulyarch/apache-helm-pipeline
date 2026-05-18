@@ -1,3 +1,2 @@
-🚀 CI/CD Pipeline — Apache Hello World on AWS EKS
-
+ROCKET MODE
 # apache-helm-pipeline
