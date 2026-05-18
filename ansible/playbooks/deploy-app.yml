@@ -1,0 +1,63 @@
+---
+- name: Deploy Apache Web Server via Helm
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cluster_name: "{{ lookup('env', 'CLUSTER_NAME') | default('apache-eks-cluster') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-west-2') }}"
+    image_repository: "{{ lookup('env', 'IMAGE_REPOSITORY') }}"
+    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
+    helm_release_name: "apache-web"
+    helm_chart_path: "../../helm/apache-chart"
+    namespace: "apache-app"
+
+  tasks:
+    - name: Update kubeconfig
+      ansible.builtin.command:
+        cmd: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}"
+      changed_when: true
+
+    - name: Add Helm repo for dependencies (if needed)
+      ansible.builtin.command:
+        cmd: "helm repo update"
+      changed_when: false
+      ignore_errors: true
+
+    - name: Deploy Apache using Helm chart
+      kubernetes.core.helm:
+        name: "{{ helm_release_name }}"
+        chart_ref: "{{ helm_chart_path }}"
+        release_namespace: "{{ namespace }}"
+        create_namespace: true
+        values:
+          image:
+            repository: "{{ image_repository }}"
+            tag: "{{ image_tag }}"
+        wait: true
+        wait_timeout: "300s"
+
+    - name: Verify deployment
+      ansible.builtin.command:
+        cmd: "kubectl get pods -n {{ namespace }}"
+      register: pods_output
+      changed_when: false
+
+    - name: Display running pods
+      ansible.builtin.debug:
+        var: pods_output.stdout_lines
+
+    - name: Get Load Balancer URL
+      ansible.builtin.command:
+        cmd: "kubectl get svc -n {{ namespace }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
+      register: lb_url
+      changed_when: false
+      retries: 10
+      delay: 30
+      until: lb_url.stdout != ""
+
+    - name: Display application URL
+      ansible.builtin.debug:
+        msg: "Application is accessible at: http://{{ lb_url.stdout }}"
+

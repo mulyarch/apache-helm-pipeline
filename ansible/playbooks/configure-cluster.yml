@@ -1,0 +1,48 @@
+---
+- name: Configure EKS Cluster Post-Deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cluster_name: "{{ lookup('env', 'CLUSTER_NAME') | default('apache-eks-cluster') }}"
+    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-west-2') }}"
+
+  tasks:
+    - name: Update kubeconfig
+      ansible.builtin.command:
+        cmd: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}"
+      changed_when: true
+
+    - name: Verify cluster connectivity
+      ansible.builtin.command:
+        cmd: "kubectl get nodes"
+      register: nodes_output
+      changed_when: false
+
+    - name: Display cluster nodes
+      ansible.builtin.debug:
+        var: nodes_output.stdout_lines
+
+    - name: Create application namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: apache-app
+            labels:
+              app: apache-web
+              environment: "{{ lookup('env', 'ENVIRONMENT') | default('dev') }}"
+
+    - name: Verify namespace creation
+      ansible.builtin.command:
+        cmd: "kubectl get namespace apache-app"
+      register: ns_output
+      changed_when: false
+
+    - name: Display namespace info
+      ansible.builtin.debug:
+        var: ns_output.stdout_lines
+
