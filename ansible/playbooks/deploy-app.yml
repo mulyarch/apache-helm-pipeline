@@ -1,6 +1,6 @@
 ---
 - name: Deploy Apache Web Server via Helm
-  hosts: localhost
+  hosts: [IP_ADDRESS]
   connection: local
   gather_facts: false
 
@@ -19,24 +19,18 @@
         cmd: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}"
       changed_when: true
 
-    - name: Add Helm repo for dependencies (if needed)
-      ansible.builtin.command:
-        cmd: "helm repo update"
-      changed_when: false
-      ignore_errors: true
-
     - name: Deploy Apache using Helm chart
-      kubernetes.core.helm:
-        name: "{{ helm_release_name }}"
-        chart_ref: "{{ helm_chart_path }}"
-        release_namespace: "{{ namespace }}"
-        create_namespace: true
-        values:
-          image:
-            repository: "{{ image_repository }}"
-            tag: "{{ image_tag }}"
-        wait: true
-        wait_timeout: "300s"
+      ansible.builtin.command:
+        cmd: >
+          helm upgrade --install {{ helm_release_name }}
+          {{ helm_chart_path }}
+          --namespace {{ namespace }}
+          --create-namespace
+          --set image.repository={{ image_repository }}
+          --set image.tag={{ image_tag }}
+          --wait
+          --timeout 300s
+      changed_when: true
 
     - name: Verify deployment
       ansible.builtin.command:
@@ -53,11 +47,101 @@
         cmd: "kubectl get svc -n {{ namespace }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
       register: lb_url
       changed_when: false
-      retries: 10
-      delay: 30
-      until: lb_url.stdout != ""
 
     - name: Display application URL
       ansible.builtin.debug:
         msg: "Application is accessible at: http://{{ lb_url.stdout }}"
 
+And here's the updated CI workflow lint step — no collection install needed now:
+
+```python
+```yaml
+name: CI - Build and Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: apache-web
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/Dockerfile
+
+      - name: Lint Helm Chart
+        run: |
+          helm lint helm/apache-chart/
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.0
+
+      - name: Validate Terraform
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+          terraform fmt -check
+
+      - name: Lint Ansible Playbooks
+        run: |
+          pip install ansible-lint
+          ansible-lint ansible/playbooks/*.yml
+
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f docker/Dockerfile docker/
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest -f docker/Dockerfile docker/
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+    outputs:
+      image_tag: ${{ env.IMAGE_TAG }}
+      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
