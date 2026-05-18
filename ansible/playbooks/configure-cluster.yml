@@ -45,4 +45,3 @@
     - name: Display namespace info
       ansible.builtin.debug:
         var: ns_output.stdout_lines
-

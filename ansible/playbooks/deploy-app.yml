@@ -43,4 +43,3 @@
     - name: Display application URL
       ansible.builtin.debug:
         msg: "Application is accessible at: http://{{ lb_url.stdout }}"
-
