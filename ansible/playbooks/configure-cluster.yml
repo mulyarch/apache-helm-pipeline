@@ -1,7 +1,6 @@
-```yaml
 ---
 - name: Configure EKS Cluster Post-Deployment
-  hosts: localhost
+  hosts: [IP_ADDRESS]
   connection: local
   gather_facts: false
 
@@ -46,3 +45,4 @@
     - name: Display namespace info
       ansible.builtin.debug:
         var: ns_output.stdout_lines
+

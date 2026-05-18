@@ -1,6 +1,6 @@
 ---
 - name: Deploy Apache Web Server via Helm
-  hosts: localhost
+  hosts: [IP_ADDRESS]
   connection: local
   gather_facts: false
 
@@ -11,7 +11,7 @@
     image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
     helm_release_name: "apache-web"
     helm_chart_path: "../../helm/apache-chart"
-    namespace: "apache-app"
+    app_namespace: "apache-app"
 
   tasks:
     - name: Update kubeconfig
@@ -21,27 +21,12 @@
 
     - name: Deploy Apache using Helm chart
       ansible.builtin.command:
-        argv:
-          - helm
-          - upgrade
-          - --install
-          - "{{ helm_release_name }}"
-          - "{{ helm_chart_path }}"
-          - --namespace
-          - "{{ namespace }}"
-          - --create-namespace
-          - --set
-          - "image.repository={{ image_repository }}"
-          - --set
-          - "image.tag={{ image_tag }}"
-          - --wait
-          - --timeout
-          - 300s
+        cmd: "helm upgrade --install {{ helm_release_name }} {{ helm_chart_path }} --namespace {{ app_namespace }} --create-namespace --set image.repository={{ image_repository }} --set image.tag={{ image_tag }} --wait --timeout 300s"
       changed_when: true
 
     - name: Verify deployment
       ansible.builtin.command:
-        cmd: "kubectl get pods -n {{ namespace }}"
+        cmd: "kubectl get pods -n {{ app_namespace }}"
       register: pods_output
       changed_when: false
 
@@ -51,10 +36,11 @@
 
     - name: Get Load Balancer URL
       ansible.builtin.command:
-        cmd: "kubectl get svc -n {{ namespace }} -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'"
+        cmd: "kubectl get svc -n {{ app_namespace }} -o jsonpath={.items[0].status.loadBalancer.ingress[0].hostname}"
       register: lb_url
       changed_when: false
 
     - name: Display application URL
       ansible.builtin.debug:
         msg: "Application is accessible at: http://{{ lb_url.stdout }}"
+
