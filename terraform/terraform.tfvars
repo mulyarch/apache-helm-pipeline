@@ -1,0 +1,5 @@
+aws_region      = "us-west-2"
+cluster_name    = "apache-eks-cluster"
+cluster_version = "1.30"
+vpc_cidr        = "10.0.0.0/16"
+environment     = "dev"
