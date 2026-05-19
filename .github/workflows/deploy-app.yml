@@ -1,83 +1,71 @@
+name: Deploy Application
 
-  name: Deploy Apache
-  hosts: localhost
-  connection: local
-  gather_facts: false
+on:
+  workflow_run:
+    workflows: ["CI - Build and Test"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: false
+        default: 'latest'
 
-  vars:
-    cluster_name: "{{ lookup('env', 'CLUSTER_NAME') | default('apache-eks-cluster') }}"
-    aws_region: "{{ lookup('env', 'AWS_REGION') | default('us-west-2') }}"
-    image_repository: "{{ lookup('env', 'IMAGE_REPOSITORY') }}"
-    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
-    helm_release_name: "apache-web"
-    helm_chart_path: "helm/apache-chart"
-    app_namespace: "apache-app"
+env:
+  AWS_REGION: us-west-2
+  CLUSTER_NAME: apache-eks-cluster
+  ECR_REPOSITORY: apache-web
 
-  tasks:
-    - name: Update kubeconfig
-      ansible.builtin.command:
-        cmd: >-
-          aws eks update-kubeconfig
-          --name {{ cluster_name }}
-          --region {{ aws_region }}
-      changed_when: true
+jobs:
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      id-token: write
+      contents: read
 
-    - name: Deploy Apache using Helm chart
-      ansible.builtin.command:
-        cmd: >-
-          helm upgrade --install
-          {{ helm_release_name }}
-          {{ helm_chart_path }}
-          --namespace {{ app_namespace }}
-          --create-namespace
-          --set image.repository={{ image_repository }}
-          --set image.tag={{ image_tag }}
-          --wait
-          --timeout 300s
-      changed_when: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Wait for pods to be ready
-      ansible.builtin.command:
-        cmd: >-
-          kubectl wait --for=condition=ready pod
-          -l app.kubernetes.io/name=apache-web
-          -n {{ app_namespace }}
-          --timeout=120s
-      changed_when: false
-      register: wait_result
-      ignore_errors: true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Verify deployment
-      ansible.builtin.command:
-        cmd: "kubectl get pods -n {{ app_namespace }} -o wide"
-      register: pods_output
-      changed_when: false
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Display running pods
-      ansible.builtin.debug:
-        var: pods_output.stdout_lines
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
 
-    - name: Wait for Load Balancer to provision
-      ansible.builtin.command:
-        cmd: >-
-          kubectl get svc {{ helm_release_name }}-apache-web
-          -n {{ app_namespace }}
-          -o jsonpath={.status.loadBalancer.ingress[0].hostname}
-      register: lb_url
-      changed_when: false
-      retries: 10
-      delay: 30
-      until: lb_url.stdout != ""
-      ignore_errors: true
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-    - name: Display application URL
-      ansible.builtin.debug:
-        msg: "Application is accessible at: http://{{ lb_url.stdout }}"
-      when: lb_url.stdout != ""
+      - name: Install Ansible
+        run: |
+          pip install ansible
 
-    - name: Load Balancer not ready yet
-      ansible.builtin.debug:
-        msg: >-
-          Load Balancer is still provisioning.
-          Run 'kubectl get svc -n apache-app' to check status later.
-      when: lb_url.stdout == ""
+      - name: Deploy with Ansible + Helm
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          IMAGE_REPOSITORY: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag || github.sha }}
+        run: |
+          ansible-playbook ansible/playbooks/deploy-app.yml
+
+      - name: Verify deployment
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+          kubectl rollout status deployment -n apache-app --timeout=300s || true
+          echo "---"
+          echo "Services:"
+          kubectl get svc -n apache-app
