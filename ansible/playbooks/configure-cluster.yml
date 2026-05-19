@@ -1,6 +1,6 @@
 ---
 - name: Configure EKS Cluster Post-Deployment
-  hosts: [IP_ADDRESS]
+  hosts: localhost
   connection: local
   gather_facts: false
 
@@ -12,7 +12,10 @@
   tasks:
     - name: Update kubeconfig
       ansible.builtin.command:
-        cmd: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}"
+        cmd: >-
+          aws eks update-kubeconfig
+          --name {{ cluster_name }}
+          --region {{ aws_region }}
       changed_when: true
 
     - name: Verify cluster connectivity
@@ -25,23 +28,53 @@
       ansible.builtin.debug:
         var: nodes_output.stdout_lines
 
+    - name: Add EKS Helm chart repo
+      ansible.builtin.command:
+        cmd: "helm repo add eks https://aws.github.io/eks-charts"
+      changed_when: true
+      failed_when: false
+
+    - name: Update Helm repos
+      ansible.builtin.command:
+        cmd: "helm repo update"
+      changed_when: true
+
+    - name: Install AWS Load Balancer Controller
+      ansible.builtin.command:
+        cmd: >-
+          helm upgrade --install aws-load-balancer-controller
+          eks/aws-load-balancer-controller
+          --namespace kube-system
+          --set clusterName={{ cluster_name }}
+          --set serviceAccount.create=true
+          --set serviceAccount.name=aws-load-balancer-controller
+          --set region={{ aws_region }}
+          --wait
+          --timeout 300s
+      changed_when: true
+
+    - name: Verify LB Controller is running
+      ansible.builtin.command:
+        cmd: "kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller"
+      register: lb_pods
+      changed_when: false
+
+    - name: Display LB Controller pods
+      ansible.builtin.debug:
+        var: lb_pods.stdout_lines
+
     - name: Create application namespace
       ansible.builtin.shell:
-        cmd: "set -o pipefail && kubectl create namespace apache-app --dry-run=client -o yaml | kubectl apply -f -"
+        cmd: >-
+          set -o pipefail &&
+          kubectl create namespace apache-app --dry-run=client -o yaml |
+          kubectl apply -f -
         executable: /bin/bash
       changed_when: true
 
     - name: Label the namespace
       ansible.builtin.command:
-        cmd: "kubectl label namespace apache-app app=apache-web environment={{ env_name }} --overwrite"
+        cmd: >-
+          kubectl label namespace apache-app
+          app=apache-web environment={{ env_name }} --overwrite
       changed_when: true
-
-    - name: Verify namespace creation
-      ansible.builtin.command:
-        cmd: "kubectl get namespace apache-app"
-      register: ns_output
-      changed_when: false
-
-    - name: Display namespace info
-      ansible.builtin.debug:
-        var: ns_output.stdout_lines

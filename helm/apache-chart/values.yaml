@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: ""  # Will be set by CI/CD (e.g., your ECR repo)
+  repository: ""
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -9,10 +9,7 @@ service:
   type: LoadBalancer
   port: 80
   targetPort: 80
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "external"
-    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
-    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+  annotations: {}
 
 resources:
   limits:
