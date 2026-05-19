@@ -10,13 +10,16 @@
     image_repository: "{{ lookup('env', 'IMAGE_REPOSITORY') }}"
     image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
     helm_release_name: "apache-web"
-    helm_chart_path: "../../helm/apache-chart"
+    helm_chart_path: "helm/apache-chart"
     app_namespace: "apache-app"
 
   tasks:
     - name: Update kubeconfig
       ansible.builtin.command:
-        cmd: "aws eks update-kubeconfig --name {{ cluster_name }} --region {{ aws_region }}"
+        cmd: >-
+          aws eks update-kubeconfig
+          --name {{ cluster_name }}
+          --region {{ aws_region }}
       changed_when: true
 
     - name: Deploy Apache using Helm chart
@@ -33,9 +36,20 @@
           --timeout 300s
       changed_when: true
 
+    - name: Wait for pods to be ready
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for=condition=ready pod
+          -l app.kubernetes.io/name=apache-web
+          -n {{ app_namespace }}
+          --timeout=120s
+      changed_when: false
+      register: wait_result
+      ignore_errors: true
+
     - name: Verify deployment
       ansible.builtin.command:
-        cmd: "kubectl get pods -n {{ app_namespace }}"
+        cmd: "kubectl get pods -n {{ app_namespace }} -o wide"
       register: pods_output
       changed_when: false
 
@@ -43,14 +57,27 @@
       ansible.builtin.debug:
         var: pods_output.stdout_lines
 
-    - name: Get Load Balancer URL
+    - name: Wait for Load Balancer to provision
       ansible.builtin.command:
         cmd: >-
-          kubectl get svc -n {{ app_namespace }}
-          -o jsonpath={.items[0].status.loadBalancer.ingress[0].hostname}
+          kubectl get svc {{ helm_release_name }}-apache-web
+          -n {{ app_namespace }}
+          -o jsonpath={.status.loadBalancer.ingress[0].hostname}
       register: lb_url
       changed_when: false
+      retries: 10
+      delay: 30
+      until: lb_url.stdout != ""
+      ignore_errors: true
 
     - name: Display application URL
       ansible.builtin.debug:
         msg: "Application is accessible at: http://{{ lb_url.stdout }}"
+      when: lb_url.stdout != ""
+
+    - name: Load Balancer not ready yet
+      ansible.builtin.debug:
+        msg: >-
+          Load Balancer is still provisioning.
+          Run 'kubectl get svc -n apache-app' to check status later.
+      when: lb_url.stdout == ""
