@@ -1,4 +1,5 @@
-  name: Deploy Apache Web Server via Helm
+
+  name: Deploy Apache
   hosts: localhost
   connection: local
   gather_facts: false
