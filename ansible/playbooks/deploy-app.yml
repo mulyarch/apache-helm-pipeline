@@ -44,7 +44,8 @@
           -n {{ app_namespace }}
           --timeout=120s
       changed_when: false
-      ignore_errors: true
+      register: wait_result
+      failed_when: wait_result.rc != 0 and 'no matching resources found' not in wait_result.stderr
 
     - name: Verify deployment
       ansible.builtin.command:
@@ -67,7 +68,7 @@
       retries: 10
       delay: 30
       until: lb_url.stdout != ""
-      ignore_errors: true
+      failed_when: false
 
     - name: Display application URL
       ansible.builtin.debug:
