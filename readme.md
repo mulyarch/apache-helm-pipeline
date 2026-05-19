@@ -1,8 +1,8 @@
 # Apache Helm Pipeline
 
-![CI](https://github.com/YOUR_USERNAME/apache-helm-pipeline/actions/workflows/ci.yml/badge.svg)
-![Infrastructure](https://github.com/YOUR_USERNAME/apache-helm-pipeline/actions/workflows/deploy-infra.yml/badge.svg)
-![Deploy](https://github.com/YOUR_USERNAME/apache-helm-pipeline/actions/workflows/deploy-app.yml/badge.svg)
+![CI](https://github.com/mulyarch/apache-helm-pipeline/actions/workflows/ci.yml/badge.svg)
+![Infrastructure](https://github.com/mulyarch/apache-helm-pipeline/actions/workflows/deploy-infra.yml/badge.svg)
+![Deploy](https://github.com/mulyarch/apache-helm-pipeline/actions/workflows/deploy-app.yml/badge.svg)
 
 ## Overview
 Full CI/CD pipeline deploying Apache web server on AWS EKS using Docker, Terraform, Ansible, Helm, and GitHub Actions.
