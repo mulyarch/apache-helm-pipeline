@@ -25,6 +25,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: write
+      statuses: write
 
     steps:
       - name: Checkout code
@@ -54,6 +56,7 @@ jobs:
           pip install ansible
 
       - name: Deploy with Ansible + Helm
+        id: deploy
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
           AWS_REGION: ${{ env.AWS_REGION }}
@@ -62,9 +65,68 @@ jobs:
         run: |
           ansible-playbook ansible/playbooks/deploy-app.yml
 
-      - name: Verify deployment
+      - name: Get deployment info
+        id: info
         run: |
           aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+          LB_URL=$(kubectl get svc -n apache-app -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
+          POD_COUNT=$(kubectl get pods -n apache-app --no-headers 2>/dev/null | wc -l || echo "0")
+          HELM_REVISION=$(helm list -n apache-app --short 2>/dev/null || echo "unknown")
+          echo "lb_url=$LB_URL" >> $GITHUB_OUTPUT
+          echo "pod_count=$POD_COUNT" >> $GITHUB_OUTPUT
+          echo "helm_revision=$HELM_REVISION" >> $GITHUB_OUTPUT
+
+      - name: Set commit status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: 'success',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Deployed to EKS successfully',
+              context: 'deployment/eks'
+            });
+
+      - name: Comment on associated PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha
+            });
+
+            const body = `## 🚀 Deployment Successful!
+
+            | Detail | Value |
+            |--------|-------|
+            | **Status** | ✅ Deployed |
+            | **Image Tag** | \`${sha.substring(0, 7)}\` |
+            | **Pods Running** | ${{ steps.info.outputs.pod_count }} |
+            | **Load Balancer** | ${{ steps.info.outputs.lb_url }} |
+            | **Namespace** | apache-app |
+            | **Cluster** | apache-eks-cluster |
+            | **Workflow Run** | [View Logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |
+
+            ---
+            *Deployed via GitHub Actions at ${new Date().toISOString()}*`;
+
+            for (const pr of prs) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: body
+              });
+            }
+
+      - name: Verify deployment
+        run: |
           kubectl rollout status deployment -n apache-app --timeout=300s || true
           echo "---"
           echo "Services:"
