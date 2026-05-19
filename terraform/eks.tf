@@ -26,42 +26,8 @@ module "eks" {
     }
   }
 
-  # Enable OIDC provider for service accounts
-  enable_irsa = true
-
   tags = {
     Environment = var.environment
     Project     = "k8s-apache"
   }
 }
-
-data "aws_eks_cluster_auth" "cluster" {
-  name = module.eks.cluster_name
-}
-
-# Install AWS Load Balancer Controller
-resource "helm_release" "aws_load_balancer_controller" {
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = "kube-system"
-  version    = "1.6.2"
-
-  set {
-    name  = "clusterName"
-    value = module.eks.cluster_name
-  }
-
-  set {
-    name  = "serviceAccount.create"
-    value = "true"
-  }
-
-  set {
-    name  = "serviceAccount.name"
-    value = "aws-load-balancer-controller"
-  }
-
-  depends_on = [module.eks]
-}
-
