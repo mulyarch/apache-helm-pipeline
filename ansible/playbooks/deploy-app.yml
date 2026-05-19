@@ -10,8 +10,8 @@
     image_repository: "{{ lookup('env', 'IMAGE_REPOSITORY') }}"
     image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
     helm_release_name: "apache-web"
-    helm_chart_path: "{{ lookup('env', 'GITHUB_WORKSPACE') }}/helm/apache-chart"
     app_namespace: "apache-app"
+    workspace: "{{ lookup('env', 'GITHUB_WORKSPACE') | default(playbook_dir + '/../..') }}"
 
   tasks:
     - name: Update kubeconfig
@@ -27,7 +27,7 @@
         cmd: >-
           helm upgrade --install
           {{ helm_release_name }}
-          {{ helm_chart_path }}
+          {{ workspace }}/helm/apache-chart
           --namespace {{ app_namespace }}
           --create-namespace
           --set image.repository={{ image_repository }}
@@ -44,7 +44,6 @@
           -n {{ app_namespace }}
           --timeout=120s
       changed_when: false
-      register: wait_result
       ignore_errors: true
 
     - name: Verify deployment
@@ -79,5 +78,5 @@
       ansible.builtin.debug:
         msg: >-
           Load Balancer is still provisioning.
-          Run 'kubectl get svc -n apache-app' to check status later.
+          Run kubectl get svc -n apache-app to check status later.
       when: lb_url.stdout == ""
