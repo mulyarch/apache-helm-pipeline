@@ -10,7 +10,7 @@
     image_repository: "{{ lookup('env', 'IMAGE_REPOSITORY') }}"
     image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
     helm_release_name: "apache-web"
-    helm_chart_path: "helm/apache-chart"
+    helm_chart_path: "./helm/apache-chart"
     app_namespace: "apache-app"
 
   tasks:
