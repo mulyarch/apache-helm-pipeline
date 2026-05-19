@@ -15,6 +15,7 @@ on:
 
 env:
   AWS_REGION: us-west-2
+  CLUSTER_NAME: apache-eks-cluster
   TF_WORKING_DIR: terraform
 
 jobs:
@@ -38,7 +39,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: 1.12.0
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -78,14 +79,18 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install dependencies
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Ansible
         run: |
-          pip install ansible kubernetes boto3
-          ansible-galaxy collection install kubernetes.core
+          pip install ansible
 
       - name: Run Ansible cluster configuration
         env:
-          CLUSTER_NAME: apache-eks-cluster
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
           AWS_REGION: ${{ env.AWS_REGION }}
           ENVIRONMENT: dev
         run: |
